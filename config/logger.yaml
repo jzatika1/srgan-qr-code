@@ -1,0 +1,50 @@
+version: 1
+disable_existing_loggers: False
+
+formatters:
+  detailed:
+    format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+  simple:
+    format: '%(levelname)s %(message)s'
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: detailed
+    stream: ext://sys.stdout
+  file:
+    class: logging.FileHandler
+    level: DEBUG
+    formatter: detailed
+    filename: "logs/main.log"
+
+loggers:
+  root:
+    level: DEBUG
+    handlers: [console, file]
+
+  qr_code_generator:
+    level: DEBUG
+    handlers: [console]
+    propagate: no
+
+  dataset_preparation:
+    level: DEBUG
+    handlers: [console]
+    propagate: no
+
+  srgan_model:
+    level: DEBUG
+    handlers: [console]
+    propagate: no
+
+  srgan_trainer:
+    level: DEBUG
+    handlers: [console]
+    propagate: no
+
+  utils:
+    level: DEBUG
+    handlers: [console]
+    propagate: no

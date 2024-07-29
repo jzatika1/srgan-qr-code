@@ -1,0 +1,39 @@
+qr_code:
+  message: "This is a test message"
+  file_path: "data/raw/perfect_qr/perfect_qr.png"
+  version: 1
+  error_correction: "L"
+  box_size: 10
+  border: 4
+
+dataset:
+  hq_img_path: "data/raw/perfect_qr/perfect_qr.png"
+  output_dir: "data/processed/dataset/"
+  num_samples: 10000
+  val_split: 0.2
+  degradations:
+    noise: 0.05
+
+srgan:
+  generator:
+    residual_blocks: 16
+    initial_filters: 64
+    kernel_size: 3
+  discriminator:
+    initial_filters: 128
+    kernel_size: 3
+  vgg:
+    layer: 20  # VGG layer used for perceptual loss
+    weights: "imagenet"
+  training:
+    epochs: 100
+    batch_size: 64
+    generator_learning_rate: 0.003
+    discriminator_learning_rate: 0.00005
+    beta1: 0.5
+    beta2: 0.999
+    lambda: 0.5  # Coefficient for adversarial loss
+    save_interval: 10  # Save model every 10 epochs
+  data:
+    dataset_dir: "data/processed/dataset/"
+    generated_dir: "data/generated/srgan_output/"
