@@ -66,12 +66,32 @@ Logging configurations can be specified using a logging configuration file. Exam
 
 ## Requirements
 
-Ensure you have the required Python packages installed. You can install them using:
+Ensure you have the required packages installed using `conda`. You can create the environment using the provided `environment.yml` file:
 
 ```
-pip install -r requirements.txt
+name: srgan-qr-code
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - numpy
+  - pandas
+  - scikit-learn
+  - pillow
+  - matplotlib
+  - pyyaml
+  - jupyterlab
+  - ipykernel
+  - pip=24.0
+  - pip:
+      - qrcode[pil]
+      - tensorflow[and-cuda]
+      - tqdm
 ```
 
-## License
+To create the environment, run:
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+```
+conda env create -f environment.yml
+```
