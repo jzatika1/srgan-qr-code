@@ -6,11 +6,23 @@ from src.utils import get_function_logger, ensure_directories_exist
 
 def generate_qr_code(config):
     logger = get_function_logger()
-    logger.debug("Starting QR code generation.")
+    logger.debug("Starting QR code generation or loading.")
     
     file_path = config['file_path']
     ensure_directories_exist([os.path.dirname(file_path)])
     
+    # Check if the QR code already exists
+    if os.path.exists(file_path):
+        logger.info(f"Loading existing QR code from {file_path}")
+        img = Image.open(file_path)
+        img_array = np.array(img)
+        img_array = img_array.astype(np.float32) / 255.0
+        img_array = np.where(img_array > 0.5, 1.0, 0.0)
+        img_array = np.expand_dims(img_array, axis=-1)
+        return img_array, img.size
+
+    # If the QR code doesn't exist, generate a new one
+    logger.info("Generating new QR code.")
     message = config['message']
     target_size = (128, 128)
     
@@ -41,7 +53,7 @@ def generate_qr_code(config):
         
         if border < 0:
             logger.error("Cannot generate QR code within 128x128 size limit.")
-            return None
+            return None, None
     
     # Calculate padding to center the QR code
     left_padding = (target_size[0] - img.size[0]) // 2
