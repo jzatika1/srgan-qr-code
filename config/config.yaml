@@ -1,5 +1,6 @@
 qr_code:
   message: "This is a test message"
+  perfect_qr_dir: "data/raw/perfect_qr/"
   file_path: "data/raw/perfect_qr/perfect_qr.png"
   version: 1
   error_correction: "L"
@@ -9,10 +10,12 @@ qr_code:
 dataset:
   hq_img_path: "data/raw/perfect_qr/perfect_qr.png"
   output_dir: "data/processed/dataset/"
-  num_samples: 10000
+  num_samples: 200
   val_split: 0.2
   degradations:
-    noise: 0.05
+    noise: 0.1
+    blur: 1.5
+    jpeg_quality: 65
 
 srgan:
   generator:
@@ -20,20 +23,28 @@ srgan:
     initial_filters: 64
     kernel_size: 3
   discriminator:
-    initial_filters: 128
+    initial_filters: 64
     kernel_size: 3
   vgg:
-    layer: 20  # VGG layer used for perceptual loss
+    layer: "vgg19"
     weights: "imagenet"
   training:
-    epochs: 100
+    epochs: 200
     batch_size: 64
-    generator_learning_rate: 0.003
-    discriminator_learning_rate: 0.00005
+    generator_learning_rate: 0.0001
+    discriminator_learning_rate: 0.00005  # Reduced discriminator learning rate
     beta1: 0.5
     beta2: 0.999
-    lambda: 0.5  # Coefficient for adversarial loss
-    save_interval: 10  # Save model every 10 epochs
+    lambda: 0.005  # Weight for adversarial loss
+    content_loss_weight: 1.0
+    bce_loss_weight: 10.0
+    adversarial_loss_weight: 0.001
+    save_interval: 10
+    loss_function: "least_squares"
+    epsilon: 1e-8
   data:
     dataset_dir: "data/processed/dataset/"
     generated_dir: "data/generated/srgan_output/"
+    train_dir: "data/processed/dataset/train/"
+    val_dir: "data/processed/dataset/val/"
+    dataset_info: "data/processed/dataset/dataset_info.json"

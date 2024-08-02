@@ -6,7 +6,7 @@ import numpy as np
 import os
 from PIL import Image
 from src.utils import get_function_logger
-from src.srgan_model import build_discriminator, build_vgg
+from src.srgan_model import build_discriminator
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -19,7 +19,7 @@ def build_generator(config):
         res = BatchNormalization()(res)
         return Add()([x, res])
 
-    input_layer = Input(shape=(32, 32, 3))
+    input_layer = Input(shape=(128, 128, 1))
     x = Conv2D(config['initial_filters'], (9, 9), padding='same')(input_layer)
     x = PReLU(shared_axes=[1, 2])(x)
 
@@ -29,31 +29,23 @@ def build_generator(config):
     x = Conv2D(config['initial_filters'], config['kernel_size'], padding='same')(x)
     x = BatchNormalization()(x)
 
-    # Upsampling layers to increase resolution
-    x = Conv2D(256, (3, 3), padding='same')(x)
-    x = Lambda(lambda x: tf.nn.depth_to_space(x, 2))(x)
+    x = Conv2D(64, (3, 3), padding='same')(x)
     x = PReLU(shared_axes=[1, 2])(x)
 
-    x = Conv2D(256, (3, 3), padding='same')(x)
-    x = Lambda(lambda x: tf.nn.depth_to_space(x, 2))(x)
-    x = PReLU(shared_axes=[1, 2])(x)
-
-    output_layer = Conv2D(3, (9, 9), padding='same', activation='tanh')(x)
+    output_layer = Conv2D(1, (9, 9), padding='same', activation='sigmoid')(x)
 
     return Model(inputs=input_layer, outputs=output_layer)
 
-
-def load_dataset(srgan_config, dataset_config, batch_size, hr_size=(128, 128), lr_size=(32, 32)):
+def load_dataset(srgan_config, dataset_config, batch_size):
     logger = get_function_logger()
     logger.info("Starting dataset loading process")
     
-    def preprocess(image_path):
-        image = tf.io.read_file(image_path)
-        image = tf.image.decode_png(image, channels=3)  # Ensure 3 channels
-        image = tf.image.resize(image, lr_size)
-        image = (tf.cast(image, tf.float32) / 127.5) - 1.0
-        logger.debug(f"Preprocessed image shape: {image.shape}")
-        return image
+    def preprocess(lr_path):
+        lr_image = tf.io.read_file(lr_path)
+        lr_image = tf.image.decode_png(lr_image, channels=1)
+        lr_image = tf.cast(lr_image, tf.float32) / 255.0
+        lr_image = tf.where(lr_image > 0.5, 1.0, 0.0)  # Thresholding
+        return lr_image
 
     # Load the single HR image
     hr_image_path = dataset_config['hq_img_path']
@@ -63,67 +55,73 @@ def load_dataset(srgan_config, dataset_config, batch_size, hr_size=(128, 128), l
         raise FileNotFoundError(f"HR image not found at {hr_image_path}")
 
     hr_image = tf.io.read_file(hr_image_path)
-    hr_image = tf.image.decode_png(hr_image, channels=3)  # Ensure 3 channels
-    hr_image = tf.image.resize(hr_image, hr_size)
-    hr_image = (tf.cast(hr_image, tf.float32) / 127.5) - 1.0
-    hr_image = tf.expand_dims(hr_image, 0)
+    hr_image = tf.image.decode_png(hr_image, channels=1)
+    hr_image = tf.cast(hr_image, tf.float32) / 255.0
+    hr_image = tf.where(hr_image > 0.5, 1.0, 0.0)  # Thresholding
+    hr_image = tf.expand_dims(hr_image, 0)  # Add batch dimension
     logger.info(f"HR image loaded and processed. Shape: {hr_image.shape}")
 
-    # Load LR images
-    lr_dir = srgan_config['data']['dataset_dir']
-    logger.info(f"Loading LR images from: {lr_dir}")
-    if not os.path.exists(lr_dir):
-        logger.error(f"LR image directory not found at {lr_dir}")
-        raise FileNotFoundError(f"LR image directory not found at {lr_dir}")
+    train_dir = srgan_config['data']['train_dir']
+    val_dir = srgan_config['data']['val_dir']
 
-    # Get all image files
-    all_images = [os.path.join(lr_dir, f) for f in os.listdir(lr_dir) if f.endswith('.png')]
-    logger.info(f"Found {len(all_images)} image files")
+    # Get all LR images
+    train_lr_images = [os.path.join(train_dir, f) for f in os.listdir(train_dir) if f.endswith('.png')]
+    val_lr_images = [os.path.join(val_dir, f) for f in os.listdir(val_dir) if f.endswith('.png')]
 
-    # Load validation samples
-    val_samples_file = os.path.join(lr_dir, 'val_samples.txt')
-    if os.path.exists(val_samples_file):
-        with open(val_samples_file, 'r') as f:
-            val_samples = set(f.read().splitlines())
-        train_images = [img for img in all_images if os.path.basename(img) not in val_samples]
-        val_images = [img for img in all_images if os.path.basename(img) in val_samples]
-    else:
-        logger.warning("val_samples.txt not found. Using random split.")
-        val_split = dataset_config['val_split']
-        num_val = int(len(all_images) * val_split)
-        train_images = all_images[:-num_val]
-        val_images = all_images[-num_val:]
-
-    logger.info(f"Training images: {len(train_images)}, Validation images: {len(val_images)}")
+    logger.info(f"Training images: {len(train_lr_images)}, Validation images: {len(val_lr_images)}")
 
     # Create datasets
-    train_dataset = tf.data.Dataset.from_tensor_slices(train_images)
+    train_dataset = tf.data.Dataset.from_tensor_slices(train_lr_images)
     train_dataset = train_dataset.map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-    train_dataset = train_dataset.shuffle(buffer_size=len(train_images)).batch(batch_size)
+    train_dataset = train_dataset.shuffle(buffer_size=1000)
 
-    val_dataset = tf.data.Dataset.from_tensor_slices(val_images)
+    val_dataset = tf.data.Dataset.from_tensor_slices(val_lr_images)
     val_dataset = val_dataset.map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-    val_dataset = val_dataset.batch(batch_size)
 
-    # Add the HR image to each batch
-    def add_hr_image(lr_batch):
-        batch_size = tf.shape(lr_batch)[0]
-        hr_batch = tf.repeat(hr_image, repeats=batch_size, axis=0)
-        logger.debug(f"LR batch shape: {lr_batch.shape}, HR batch shape: {hr_batch.shape}")
-        return lr_batch, hr_batch
+    # Add the HR image to each sample
+    def add_hr_image(lr_image):
+        return lr_image, hr_image[0]
 
     train_dataset = train_dataset.map(add_hr_image)
     val_dataset = val_dataset.map(add_hr_image)
 
-    logger.info(f"Train dataset size: {tf.data.experimental.cardinality(train_dataset)}")
-    logger.info(f"Validation dataset size: {tf.data.experimental.cardinality(val_dataset)}")
+    # Log the number of images before batching
+    logger.info(f"Number of training images: {len(train_lr_images)}")
+    logger.info(f"Number of validation images: {len(val_lr_images)}")
+
+    # Now batch the datasets
+    train_dataset = train_dataset.batch(batch_size)
+    val_dataset = val_dataset.batch(batch_size)
+
+    # Log the number of batches
+    train_batches = tf.data.experimental.cardinality(train_dataset).numpy()
+    val_batches = tf.data.experimental.cardinality(val_dataset).numpy()
+    logger.info(f"Number of training batches: {train_batches}")
+    logger.info(f"Number of validation batches: {val_batches}")
 
     logger.info("Dataset loading completed successfully")
     return train_dataset, val_dataset
 
+def wasserstein_loss(y_true, y_pred):
+    return tf.reduce_mean(y_true * y_pred)
+
+def least_squares_loss(y_true, y_pred):
+    return 0.5 * tf.reduce_mean(tf.square(y_true - y_pred))
+
+def gradient_penalty(discriminator, real_samples, fake_samples):
+    alpha = tf.random.uniform([real_samples.shape[0], 1, 1, 1], 0.0, 1.0)
+    interpolated = real_samples + alpha * (fake_samples - real_samples)
+    with tf.GradientTape() as gp_tape:
+        gp_tape.watch(interpolated)
+        pred = discriminator(interpolated, training=True)
+    grads = gp_tape.gradient(pred, [interpolated])[0]
+    norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+    gp = tf.reduce_mean((norm - 1.0) ** 2)
+    return gp
+
 def train_srgan(srgan_config, dataset_config):
     logger = get_function_logger()
-    logger.info("=== Starting SRGAN Training ===")
+    logger.info("=== Starting SRGAN Training for QR Codes ===")
     
     logger.info("Configuration:")
     logger.info(f"Generator: {srgan_config['generator']}")
@@ -146,58 +144,55 @@ def train_srgan(srgan_config, dataset_config):
     logger.info(f"Train dataset size: {tf.data.experimental.cardinality(train_dataset)}")
     logger.info(f"Validation dataset size: {tf.data.experimental.cardinality(val_dataset)}")
     
-    logger.info("Building VGG model for perceptual loss...")
-    vgg = build_vgg((128, 128, 3))
-    vgg.trainable = False
-    
     logger.info("Compiling models...")
-    generator_optimizer = tf.keras.optimizers.Adam(learning_rate=srgan_config['training']['generator_learning_rate'], 
-                                                   beta_1=srgan_config['training']['beta1'], 
-                                                   beta_2=srgan_config['training']['beta2'])
-    discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=srgan_config['training']['discriminator_learning_rate'], 
-                                                       beta_1=srgan_config['training']['beta1'], 
-                                                       beta_2=srgan_config['training']['beta2'])
+    generator_optimizer = Adam(learning_rate=srgan_config['training']['generator_learning_rate'], 
+                               beta_1=srgan_config['training']['beta1'], 
+                               beta_2=srgan_config['training']['beta2'])
+    discriminator_optimizer = Adam(learning_rate=srgan_config['training']['discriminator_learning_rate'], 
+                                   beta_1=srgan_config['training']['beta1'], 
+                                   beta_2=srgan_config['training']['beta2'])
     
-    bce = tf.keras.losses.BinaryCrossentropy(from_logits=False)
     mse = tf.keras.losses.MeanSquaredError()
+    binary_crossentropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
     @tf.function
     def train_step(lr_imgs, hr_imgs):
         with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
             fake_hr_imgs = generator(lr_imgs, training=True)
             
-            # Ensure hr_imgs has the correct shape
-            if hr_imgs.shape.ndims == 3:
-                hr_imgs = tf.expand_dims(hr_imgs, axis=-1)
+            real_output = discriminator(hr_imgs, training=True)
+            fake_output = discriminator(fake_hr_imgs, training=True)
             
-            # Ensure fake_hr_imgs has the correct shape
-            if fake_hr_imgs.shape.ndims == 3:
-                fake_hr_imgs = tf.expand_dims(fake_hr_imgs, axis=-1)
+            # Content loss (MSE)
+            content_loss = mse(hr_imgs, fake_hr_imgs)
             
-            noise_real = tf.random.normal(shape=hr_imgs.shape, mean=0.0, stddev=0.1)
-            noise_fake = tf.random.normal(shape=fake_hr_imgs.shape, mean=0.0, stddev=0.1)
+            # Binary cross-entropy loss
+            bce_loss = binary_crossentropy(hr_imgs, fake_hr_imgs)
             
-            real_output = discriminator(hr_imgs + noise_real, training=True)
-            fake_output = discriminator(fake_hr_imgs + noise_fake, training=True)
+            # Adversarial loss
+            gen_loss = binary_crossentropy(tf.ones_like(fake_output), fake_output)
             
-            content_loss = mse(vgg(hr_imgs), vgg(fake_hr_imgs))
+            # Total generator loss
+            total_gen_loss = (
+                srgan_config['training']['content_loss_weight'] * content_loss + 
+                srgan_config['training']['bce_loss_weight'] * bce_loss +
+                srgan_config['training']['adversarial_loss_weight'] * gen_loss
+            )
             
-            # Adversarial loss (least squares)
-            adversarial_loss = tf.reduce_mean(tf.square(fake_output - 1))
+            # Discriminator loss
+            real_loss = binary_crossentropy(tf.ones_like(real_output), real_output)
+            fake_loss = binary_crossentropy(tf.zeros_like(fake_output), fake_output)
+            total_disc_loss = real_loss + fake_loss
         
-            gen_loss = content_loss + srgan_config['training']['lambda'] * adversarial_loss
-            
-            real_loss = bce(tf.random.uniform(real_output.shape, 0.8, 1.0), real_output)
-            fake_loss = bce(tf.random.uniform(fake_output.shape, 0.0, 0.2), fake_output)
-            disc_loss = real_loss + fake_loss
+        # Compute gradients
+        gradients_of_generator = gen_tape.gradient(total_gen_loss, generator.trainable_variables)
+        gradients_of_discriminator = disc_tape.gradient(total_disc_loss, discriminator.trainable_variables)
         
-        gradients_of_generator = gen_tape.gradient(gen_loss, generator.trainable_variables)
-        gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
-        
+        # Apply gradients
         generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
         discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
         
-        return gen_loss, disc_loss
+        return total_gen_loss, total_disc_loss
     
     logger.info("Ensuring output directories exist...")
     os.makedirs(srgan_config['data']['generated_dir'], exist_ok=True)
@@ -268,15 +263,21 @@ def train_srgan(srgan_config, dataset_config):
                 logger.info(f"  Saved models for epoch {epoch+1}")
             
             logger.info("  Generating and saving sample images...")
-            for lr_imgs, hr_imgs in val_dataset.take(1):
+            for lr_imgs, _ in val_dataset.take(1):
                 generated_images = generator(lr_imgs, training=False)
-                for i, img in enumerate(generated_images):
-                    img = (img * 127.5 + 127.5).numpy().astype(np.uint8)
-                    img = Image.fromarray(img)
-                    save_path = os.path.join(srgan_config['data']['generated_dir'], f"epoch_{epoch+1}_img_{i}.png")
-                    img.save(save_path)
-            logger.info("  Sample images saved successfully.")
-    
+                for i, gen_img in enumerate(generated_images):
+                    # Process generated image
+                    gen_img = tf.clip_by_value(gen_img, -1, 1)
+                    gen_img = ((gen_img + 1) * 127.5).numpy().astype(np.uint8)
+                    gen_img = np.squeeze(gen_img)  # Remove the channel dimension
+                    gen_img = Image.fromarray(gen_img, mode='L')  # 'L' mode for grayscale
+                
+                    # Save generated image
+                    gen_save_path = os.path.join(srgan_config['data']['generated_dir'], f"epoch_{epoch+1}_gen_img_{i}.png")
+                    gen_img.save(gen_save_path)
+                
+                logger.info("  Sample images saved successfully.")
+        
         logger.info("=== SRGAN Training Completed Successfully ===")
         
         if gen_losses and disc_losses:

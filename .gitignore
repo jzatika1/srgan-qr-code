@@ -1,6 +1,8 @@
 # Ignore data and logs folder and all it's contents
 data/
 data/*
+models/
+models/*
 logs/
 logs/*
 
