@@ -32,7 +32,8 @@ def build_generator(config):
     x = Conv2D(64, (3, 3), padding='same')(x)
     x = PReLU(shared_axes=[1, 2])(x)
 
-    output_layer = Conv2D(1, (9, 9), padding='same', activation='sigmoid')(x)
+    output_layer = Conv2D(1, (9, 9), padding='same')(x)
+    output_layer = Lambda(lambda x: tf.clip_by_value(x, 0, 1))(output_layer)
 
     return Model(inputs=input_layer, outputs=output_layer)
 
@@ -157,11 +158,14 @@ def train_srgan(srgan_config, dataset_config):
 
     @tf.function
     def train_step(lr_imgs, hr_imgs):
+        def normalize_images(images):
+            return tf.clip_by_value(images, 0, 1)
+        
         with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
             fake_hr_imgs = generator(lr_imgs, training=True)
             
-            real_output = discriminator(hr_imgs, training=True)
-            fake_output = discriminator(fake_hr_imgs, training=True)
+            real_output = discriminator(normalize_images(hr_imgs), training=True)
+            fake_output = discriminator(normalize_images(fake_hr_imgs), training=True)
             
             # Content loss (MSE)
             content_loss = mse(hr_imgs, fake_hr_imgs)

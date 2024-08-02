@@ -10,7 +10,7 @@ qr_code:
 dataset:
   hq_img_path: "data/raw/perfect_qr/perfect_qr.png"
   output_dir: "data/processed/dataset/"
-  num_samples: 200
+  num_samples: 2500
   val_split: 0.2
   degradations:
     noise: 0.1
@@ -30,7 +30,7 @@ srgan:
     weights: "imagenet"
   training:
     epochs: 200
-    batch_size: 48
+    batch_size: 34
     generator_learning_rate: 0.0001
     discriminator_learning_rate: 0.00005  # Reduced discriminator learning rate
     beta1: 0.5
